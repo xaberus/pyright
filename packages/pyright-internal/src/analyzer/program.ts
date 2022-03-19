@@ -78,6 +78,7 @@ import { ImportResult, ImportType } from './importResult';
 import { findNodeByOffset, getDocString } from './parseTreeUtils';
 import { Scope } from './scope';
 import { getScopeForNode } from './scopeUtils';
+import { SemanticTokensResult } from './semanticTokens';
 import { IPythonMode, SourceFile } from './sourceFile';
 import { isUserCode } from './sourceFileInfoUtils';
 import { isStubFile, SourceMapper } from './sourceMapper';
@@ -1456,6 +1457,27 @@ export class Program {
 
         return unfilteredDiagnostics.filter((diag) => {
             return doRangesIntersect(diag.range, range);
+        });
+    }
+
+    getSemanticTokens(
+        filePath: string,
+        range: Range | undefined,
+        token: CancellationToken
+    ): SemanticTokensResult | undefined {
+        return this._runEvaluatorWithCancellationToken(token, () => {
+            const sourceFileInfo = this.getSourceFileInfo(filePath);
+            if (!sourceFileInfo) {
+                return undefined;
+            }
+
+            this._bindFile(sourceFileInfo);
+
+            return sourceFileInfo.sourceFile.getSemanticTokens(
+                this._evaluator!,
+                range,
+                token,
+            );
         });
     }
 

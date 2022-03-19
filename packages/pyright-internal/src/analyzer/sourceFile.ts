@@ -61,6 +61,7 @@ import { ImportResolver } from './importResolver';
 import { ImportResult } from './importResult';
 import { ParseTreeCleanerWalker } from './parseTreeCleaner';
 import { Scope } from './scope';
+import { SemanticTokensGenerator, SemanticTokensResult } from './semanticTokens';
 import { SourceMapper } from './sourceMapper';
 import { SymbolTable } from './symbol';
 import { TestWalker } from './testWalker';
@@ -534,6 +535,24 @@ export class SourceFile {
         }
 
         return diagList;
+    }
+
+    getSemanticTokens(
+        evaluator: TypeEvaluator,
+        range: Range | undefined,
+        token: CancellationToken,
+    ): SemanticTokensResult | undefined {
+        if (this._isBindingNeeded || !this._parseResults) {
+            return undefined;
+        }
+
+        const generator = new SemanticTokensGenerator(
+            this._parseResults,
+            evaluator,
+            range,
+            token,
+        );
+        return generator.generate()
     }
 
     getImports(): ImportResult[] {

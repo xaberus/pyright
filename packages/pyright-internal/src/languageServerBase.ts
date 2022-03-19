@@ -60,6 +60,9 @@ import {
     ReferenceParams,
     RemoteWindow,
     RenameParams,
+    SemanticTokensBuilder,
+    SemanticTokensParams,
+    SemanticTokensRangeParams,
     SignatureHelp,
     SignatureHelpParams,
     SignatureHelpTriggerKind,
@@ -75,12 +78,14 @@ import {
     WorkspaceSymbolParams,
 } from 'vscode-languageserver';
 import { attachWorkDone, ResultProgressReporter } from 'vscode-languageserver/lib/common/progress';
+import { SemanticTokenModifiers, SemanticTokens, SemanticTokenTypes } from 'vscode-languageserver-protocol';
 
 import { AnalysisResults } from './analyzer/analysis';
 import { BackgroundAnalysisProgram } from './analyzer/backgroundAnalysisProgram';
 import { CacheManager } from './analyzer/cacheManager';
 import { ImportResolver } from './analyzer/importResolver';
 import { MaxAnalysisTime } from './analyzer/program';
+import { SemanticTokensResult } from './analyzer/semanticTokens';
 import { AnalyzerService, configFileNames, getNextServiceId } from './analyzer/service';
 import { IPythonMode } from './analyzer/sourceFile';
 import type { BackgroundAnalysisBase } from './backgroundAnalysisBase';
@@ -283,6 +288,67 @@ interface ClientCapabilities {
 }
 
 const nullProgressReporter = attachWorkDone(undefined as any, /* params */ undefined);
+
+const providedTokenTypes = [
+    SemanticTokenTypes.namespace,
+    SemanticTokenTypes.type,
+    SemanticTokenTypes.class,
+    SemanticTokenTypes.enum,
+    SemanticTokenTypes.interface,
+    SemanticTokenTypes.struct,
+    SemanticTokenTypes.typeParameter,
+    SemanticTokenTypes.parameter,
+    SemanticTokenTypes.variable,
+    SemanticTokenTypes.property,
+    SemanticTokenTypes.enumMember,
+    SemanticTokenTypes.event,
+    SemanticTokenTypes.function,
+    SemanticTokenTypes.method,
+    SemanticTokenTypes.macro,
+    SemanticTokenTypes.keyword,
+    SemanticTokenTypes.modifier,
+    SemanticTokenTypes.comment,
+    SemanticTokenTypes.string,
+    SemanticTokenTypes.number,
+    SemanticTokenTypes.regexp,
+    SemanticTokenTypes.operator,
+];
+
+const providedTokenModifiers = [
+    SemanticTokenModifiers.declaration,
+    SemanticTokenModifiers.definition,
+    SemanticTokenModifiers.readonly,
+    SemanticTokenModifiers.static,
+    SemanticTokenModifiers.deprecated,
+    SemanticTokenModifiers.abstract,
+    SemanticTokenModifiers.async,
+    SemanticTokenModifiers.modification,
+    SemanticTokenModifiers.documentation,
+    SemanticTokenModifiers.defaultLibrary,
+];
+
+function convertSemanticTokens(result: SemanticTokensResult | undefined): SemanticTokens {
+    const builder = new SemanticTokensBuilder();
+    if (result) {
+        for (const entry of result.data) {
+            const type = providedTokenTypes.indexOf(entry.type);
+            if (type < 0) {
+                continue;
+            }
+            let modifiers = 0;
+            for (const modifier of entry.modifiers) {
+                const flag = providedTokenModifiers.indexOf(modifier);
+                if (flag < 0) {
+                    continue;
+                }
+                modifiers |= 1 << flag;
+            }
+            builder.push(entry.line, entry.start, entry.length, type, modifiers);
+        }
+    }
+    const tokens = builder.build();
+    return tokens;
+}
 
 export abstract class LanguageServerBase implements LanguageServerInterface {
     protected _defaultClientConfig: any;
@@ -569,6 +635,10 @@ export abstract class LanguageServerBase implements LanguageServerInterface {
         callHierarchy.onIncomingCalls(async (params, token) => this.onIncomingCalls(params, token));
         callHierarchy.onOutgoingCalls(async (params, token) => this.onOutgoingCalls(params, token));
 
+        const semanticTokens = this._connection.languages.semanticTokens;
+        semanticTokens.on(async (params, token) => this.onSemanticTokens(params, token));
+        semanticTokens.onRange(async (params, token) => this.onSemanticTokensRange(params, token));
+
         this._connection.onDidOpenTextDocument(async (params) => this.onDidOpenTextDocument(params));
         this._connection.onDidChangeTextDocument(async (params) => this.onDidChangeTextDocument(params));
         this._connection.onDidCloseTextDocument(async (params) => this.onDidCloseTextDocument(params));
@@ -680,6 +750,15 @@ export abstract class LanguageServerBase implements LanguageServerInterface {
                     workDoneProgress: true,
                 },
                 callHierarchyProvider: true,
+                semanticTokensProvider: {
+                    legend: {
+                        tokenTypes: providedTokenTypes,
+                        tokenModifiers: providedTokenModifiers,
+                    },
+                    full: true,
+                    range: true,
+                    workDoneProgress: true,
+                },
             },
         };
 
@@ -1233,6 +1312,22 @@ export abstract class LanguageServerBase implements LanguageServerInterface {
         });
 
         return callItems;
+    }
+
+    protected async onSemanticTokens(params: SemanticTokensParams, token: CancellationToken) {
+        const filePath = this._uriParser.decodeTextDocumentUri(params.textDocument.uri);
+        const workspace = await this.getWorkspaceForFile(filePath);
+
+        const result = await workspace.serviceInstance.getSemanticTokens(filePath, undefined, token);
+        return convertSemanticTokens(result);
+    }
+
+    protected async onSemanticTokensRange(params: SemanticTokensRangeParams, token: CancellationToken) {
+        const filePath = this._uriParser.decodeTextDocumentUri(params.textDocument.uri);
+        const workspace = await this.getWorkspaceForFile(filePath);
+
+        const result = await workspace.serviceInstance.getSemanticTokens(filePath, params.range, token);
+        return convertSemanticTokens(result);
     }
 
     protected async onDidOpenTextDocument(params: DidOpenTextDocumentParams, ipythonMode = IPythonMode.None) {

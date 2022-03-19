@@ -13,6 +13,7 @@ import { MessageChannel, MessagePort, parentPort, threadId, Worker, workerData }
 import { AnalysisCompleteCallback, AnalysisResults, analyzeProgram, nullCallback } from './analyzer/analysis';
 import { ImportResolver } from './analyzer/importResolver';
 import { Indices, OpenFileOptions, Program } from './analyzer/program';
+import { SemanticTokensResult } from './analyzer/semanticTokens';
 import {
     BackgroundThreadBase,
     createConfigOptionsFrom,
@@ -232,6 +233,31 @@ export class BackgroundAnalysisBase {
         return convertDiagnostics(result);
     }
 
+    async getSemanticTokens(
+        filePath: string,
+        range: Range | undefined,
+        token: CancellationToken
+    ): Promise<SemanticTokensResult | undefined> {
+        throwIfCancellationRequested(token);
+
+        const { port1, port2 } = new MessageChannel();
+        const waiter = getBackgroundWaiter<SemanticTokensResult | undefined>(port1);
+
+        const cancellationId = getCancellationTokenId(token);
+        this.enqueueRequest({
+            requestType: 'getSemanticTokens',
+            data: { filePath, range, cancellationId },
+            port: port2,
+        });
+
+        const result = await waiter;
+
+        port2.close();
+        port1.close();
+
+        return result;
+    }
+
     async writeTypeStub(
         targetImportPath: string,
         targetIsSingleFile: boolean,
@@ -367,6 +393,17 @@ export abstract class BackgroundAnalysisRunnerBase extends BackgroundThreadBase 
                     throwIfCancellationRequested(token);
 
                     return this.program.getDiagnosticsForRange(filePath, range);
+                }, msg.port!);
+                break;
+            }
+
+            case 'getSemanticTokens': {
+                run(() => {
+                    const { filePath, range, cancellationId } = msg.data;
+                    const token = getCancellationTokenFromId(cancellationId);
+                    throwIfCancellationRequested(token);
+
+                    return this.program.getSemanticTokens(filePath, range, token);
                 }, msg.port!);
                 break;
             }

@@ -11,6 +11,7 @@ import { CancellationToken } from 'vscode-languageserver';
 import { TextDocumentContentChangeEvent } from 'vscode-languageserver-textdocument';
 
 import { BackgroundAnalysisBase, IndexOptions, RefreshOptions } from '../backgroundAnalysisBase';
+import { throwIfCancellationRequested } from '../common/cancellationUtils';
 import { ConfigOptions, ExecutionEnvironment } from '../common/configOptions';
 import { ConsoleInterface } from '../common/console';
 import { Diagnostic } from '../common/diagnostic';
@@ -21,6 +22,7 @@ import { AnalysisCompleteCallback, analyzeProgram } from './analysis';
 import { CacheManager } from './cacheManager';
 import { ImportResolver } from './importResolver';
 import { Indices, MaxAnalysisTime, OpenFileOptions, Program } from './program';
+import { SemanticTokensResult } from './semanticTokens';
 
 export class BackgroundAnalysisProgram {
     private _program: Program;
@@ -189,6 +191,29 @@ export class BackgroundAnalysisProgram {
         }
 
         return this._program.getDiagnosticsForRange(filePath, range);
+    }
+
+    async getSemanticTokens(
+        filePath: string,
+        range: Range | undefined,
+        token: CancellationToken
+    ): Promise<SemanticTokensResult | undefined> {
+        const sourceFile = this._program.getSourceFile(filePath);
+        if (!sourceFile) {
+            return undefined;
+        }
+
+        // TODO: how to properly block here?
+        while (!sourceFile.getParseResults()) {
+            throwIfCancellationRequested(token);
+            await new Promise((f) => setTimeout(f, 100));
+        }
+
+        if (this._backgroundAnalysis) {
+            return this._backgroundAnalysis.getSemanticTokens(filePath, range, token);
+        }
+
+        return this._program.getSemanticTokens(filePath, range, token);
     }
 
     async writeTypeStub(

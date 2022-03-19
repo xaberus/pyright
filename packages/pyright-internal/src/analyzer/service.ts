@@ -74,6 +74,7 @@ import {
 } from './importResolver';
 import { MaxAnalysisTime, Program } from './program';
 import { findPythonSearchPaths } from './pythonPathUtils';
+import { SemanticTokensResult } from './semanticTokens';
 import { IPythonMode } from './sourceFile';
 import { TypeEvaluator } from './typeEvaluatorTypes';
 
@@ -559,6 +560,14 @@ export class AnalyzerService {
 
     getDiagnosticsForRange(filePath: string, range: Range, token: CancellationToken): Promise<Diagnostic[]> {
         return this._backgroundAnalysisProgram.getDiagnosticsForRange(filePath, range, token);
+    }
+
+    getSemanticTokens(
+        filePath: string,
+        range: Range | undefined,
+        token: CancellationToken
+    ): Promise<SemanticTokensResult | undefined> {
+        return this._backgroundAnalysisProgram.getSemanticTokens(filePath, range, token);
     }
 
     getConfigOptions() {
