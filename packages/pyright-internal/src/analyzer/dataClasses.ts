@@ -156,6 +156,7 @@ export function synthesizeDataClassMethods(
 
                 let variableNameNode: NameNode | undefined;
                 let aliasName: string | undefined;
+                let autoAliasName = false;
                 let variableTypeEvaluator: EntryTypeEvaluator | undefined;
                 let hasDefaultValue = false;
                 let isKeywordOnly = ClassType.isDataClassKeywordOnlyParams(classType) || sawKeywordOnlySeparator;
@@ -196,6 +197,10 @@ export function synthesizeDataClassMethods(
                                 classType.details.dataClassBehaviors?.fieldDescriptorNames || []
                             )
                         ) {
+                            if (isAttrsFieldConstructor(callType, classType)) {
+                                autoAliasName = true;
+                            }
+
                             const initArg = statement.rightExpression.arguments.find(
                                 (arg) => arg.name?.value === 'init'
                             );
@@ -322,6 +327,11 @@ export function synthesizeDataClassMethods(
 
                 if (variableNameNode && variableTypeEvaluator) {
                     const variableName = variableNameNode.value;
+
+                    // add automatic alias  courtesy of the attrs package
+                    if (autoAliasName && !aliasName && variableName.startsWith('_')) {
+                        aliasName = variableName.replace(/^_+/gm, '');
+                    }
 
                     // Don't include class vars. PEP 557 indicates that they shouldn't
                     // be considered data class entries.
@@ -703,6 +713,32 @@ function isDataclassFieldConstructor(type: Type, fieldDescriptorNames: string[])
     }
 
     return fieldDescriptorNames.some((name) => name === callName);
+}
+
+function isAttrsFieldConstructor(type: Type, classType: ClassType) {
+    let callName: string | undefined;
+
+    if (isFunction(type)) {
+        callName = type.details.fullName;
+    } else if (isOverloadedFunction(type)) {
+        callName = type.overloads[0].details.fullName;
+    } else if (isInstantiableClass(type)) {
+        callName = type.details.fullName;
+    }
+
+    if (!callName) {
+        return false;
+    }
+
+    const fieldDescriptorNames = classType.details.dataClassBehaviors?.fieldDescriptorNames;
+    if (fieldDescriptorNames) {
+        for (const name of fieldDescriptorNames) {
+            if (name === callName && name.startsWith('attr')) {
+                return true;
+            }
+        }
+    }
+    return false;
 }
 
 export function validateDataClassTransformDecorator(
